@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE generatorConfiguration PUBLIC
+        "-//mybatis.org//DTD MyBatis Generator Configuration 1.0//EN"
+        "https://mybatis.org/dtd/mybatis-generator-config_1_0.dtd">
+<!--
+  MyBatis Generator 配置：targetRuntime = MyBatis3DynamicSql。
+
+  产出 entity / mapper / DynamicSqlSupport —— 这是 codegen-maven-plugin 的**输入**。
+  驱动来自插件的 <dependencies>，不写 classPathEntry（避免路径宏在不同环境失效）。
+
+  直接生成到 src/main/java（MBG 的常规用法）：package 目录会自动创建。
+-->
+<generatorConfiguration>
+    <context id="demo" targetRuntime="MyBatis3DynamicSql" defaultModelType="flat">
+        <commentGenerator>
+            <property name="suppressAllComments" value="false"/>
+            <property name="suppressDate" value="true"/>
+            <property name="addRemarkComments" value="true"/>
+        </commentGenerator>
+
+        <jdbcConnection driverClass="com.mysql.cj.jdbc.Driver"
+                        connectionURL="${db.url}"
+                        userId="${db.user}"
+                        password="${db.password}">
+            <property name="remarksReporting" value="true"/>
+            <property name="useInformationSchema" value="true"/>
+        </jdbcConnection>
+
+        <javaTypeResolver>
+            <property name="forceBigDecimals" value="false"/>
+            <property name="useJSR310Types" value="true"/>
+        </javaTypeResolver>
+
+        <javaModelGenerator targetPackage="com.mds.demo.entity" targetProject="${project.basedir}/src/main/java">
+            <property name="enableSubPackages" value="false"/>
+        </javaModelGenerator>
+        <javaClientGenerator targetPackage="com.mds.demo.mapper" targetProject="${project.basedir}/src/main/java"
+                             type="ANNOTATEDMAPPER">
+            <property name="enableSubPackages" value="false"/>
+        </javaClientGenerator>
+
+        <table tableName="app_user" schema="codegen_test" domainObjectName="AppUser"
+               enableSelectByPrimaryKey="true" enableUpdateByPrimaryKey="true"
+               enableDeleteByPrimaryKey="true" enableInsert="true">
+            <property name="useActualColumnNames" value="false"/>
+            <property name="ignoreQualifiersAtRuntime" value="true"/>
+        </table>
+        <table tableName="order_record" schema="codegen_test" domainObjectName="OrderRecord"
+               enableSelectByPrimaryKey="true" enableUpdateByPrimaryKey="true"
+               enableDeleteByPrimaryKey="true" enableInsert="true">
+            <property name="useActualColumnNames" value="false"/>
+            <property name="ignoreQualifiersAtRuntime" value="true"/>
+        </table>
+        <table tableName="device" schema="codegen_test" domainObjectName="Device"
+               enableSelectByPrimaryKey="true" enableUpdateByPrimaryKey="true"
+               enableDeleteByPrimaryKey="true" enableInsert="true">
+            <property name="useActualColumnNames" value="false"/>
+            <property name="ignoreQualifiersAtRuntime" value="true"/>
+        </table>
+    </context>
+</generatorConfiguration>

@@ -1,0 +1,155 @@
+# ============================================================================
+# mds codegen-maven-plugin 配置
+#
+# 跑法就一条命令（处理配置里的全部实体）：
+#   mvn com.mds.codegen:codegen-maven-plugin:1.0.0-SNAPSHOT:generate
+#
+# 只想临时重生成某一个：加 -Dcodegen.entity=AppUser
+#
+# 配置文件查找顺序（相对模块目录，找到第一个就用）：
+#   1. -Dcodegen.config=<路径>
+#   2. codegen/entities.yaml
+#   3. codegen.yaml
+#   4. src/main/resources/codegen.yaml
+#   5. pom <configuration><configFile>
+#
+# 占位符：任意值里可写 ${...}，用 Maven 项目属性替换
+#   ${project.basedir} / ${project.build.directory} / ${project.version}
+#   以及 pom <properties> 里的任意自定义属性；未定义的占位符原样保留。
+#
+# 校验：未知配置项一律报错（拼错不会静默失效）。
+#
+# ⚠️ 这是一份**示例**：下面所有 com.example.demo.* 都是占位包名，
+#    抄到自己模块时必须全部改成**本项目实际的包名**，否则会报
+#    "实体 class 目录不存在: .../com/example/demo/entity"。
+# ============================================================================
+
+# ============================================================================
+# source：从哪读元数据
+#
+# 插件读的是**已编译的类**（反射），所以先 compile。
+# 好处：主键直接读 MBG 写在 mapper 上的 @Result(id = true)，列类型读 SqlColumn<T> 的泛型实参，
+# 不用反推合成 lambda、也不用假设"列名与字段按位对齐"。
+# ============================================================================
+source:
+  # 实体包名
+  entityPackage: "com.example.demo.entity"
+
+  # mapper 包名（<X>Mapper 与 <X>DynamicSqlSupport 都在这一层）
+  mapperPackage: "com.example.demo.mapper"
+
+  # 编译后的 class 根。留空 = Maven 的 project.build.outputDirectory
+  # 只有"读别人 jar 里的类"时才需要显式给。
+  classesRoot: ""
+
+# ============================================================================
+# output：生成到哪、包名
+# ============================================================================
+output:
+  # 生成根目录。
+  #
+  # target/generated-sources/codegen（默认）：生成物可丢弃，clean 就没了，重生成即可。
+  #
+  # src/main/java：**直接生成进源码树**（提交进 git 的真正代码）。
+  #   这样不需要每次构建都跑生成，也不需要 build-helper 登记源码根。
+  #   改这一项就够了，其它配置不用动。
+  #   注意：clean 不会删掉它们；改动实体后重跑一次，用 git diff 看改了哪些。
+  dir: "target/generated-sources/codegen"
+
+  # 生成物的包名
+  dtoPackage: "com.example.demo.dto"
+  convertPackage: "com.example.demo.convert"
+  modelPackage: "com.example.demo.model"
+
+  # ModelService 实现的子包
+  implSubPackage: "impl"
+
+  # 是否按域分子包。
+  #
+  # false（默认）：平铺
+  #   com.example.demo.model.AppUserModelService
+  #   com.example.demo.model.impl.AppUserModelServiceImpl
+  #
+  # true：一个工程里有多块业务时用
+  #   com.example.demo.model.user.AppUserModelService
+  #   com.example.demo.model.user.impl.AppUserModelServiceImpl
+  #   域默认取表名下划线前的部分（app_user -> app）；
+  #   需要覆盖时在 entities[] 里给该项写 domain: "user"。
+  byDomain: false
+
+# ============================================================================
+# naming：各类文件的后缀
+#
+# 文件名统一是 <实体简单名> + 后缀：
+#   AppUser + Dto              -> AppUserDto
+#   AppUser + Converter        -> AppUserConverter
+#   AppUser + ModelService     -> AppUserModelService
+#   AppUser + ModelServiceImpl -> AppUserModelServiceImpl
+# 一般不用改。
+# ============================================================================
+naming:
+  dtoSuffix: "Dto"
+  convertSuffix: "Converter"
+  serviceSuffix: "ModelService"
+  implSuffix: "ModelServiceImpl"
+
+# ============================================================================
+# write：文件已存在时怎么办
+# ============================================================================
+write:
+  # overwrite   : 无条件覆盖
+  # skip        : 已存在就跳过（已经手改过实现类时用这个）
+  # failOnDrift : 已存在且内容不同 -> 构建失败并列出文件；相同 -> 跳过（默认，CI 友好）
+  policy: "failOnDrift"
+
+# ============================================================================
+# idGenerator：主键生成器（可选）
+#
+# 配置后，主键为空的 insert 会自动调 nextId()。
+# 契约只有一条：**必须有 long nextId()**（雪花 ID 即可），不要求实现任何接口。
+#
+# 触发条件（三个同时满足）：
+#   1. 这里配了全限定名
+#   2. 主键字段名正好是 id
+#   3. 主键 Java 类型是 java.lang.Long
+# 不符合的（order_no / uuid 这类业务主键）由调用方给主键。
+# 留空 = 完全不生成主键。
+# ============================================================================
+idGenerator: "com.example.demo.common.IdGenerator"
+
+# ============================================================================
+# entities：要生成哪些实体（必填，只有列在这里的才生成）
+#
+# 每一项：
+#   name    实体简单名（必须与 entity 类名一致）
+#   enums   可选。字段名 -> 枚举类全限定名
+#
+#           两种用法：
+#           a) 枚举**已存在**：插件直接用它，生成 DTO 字段和双向转换方法
+#              （需要 fromValue(...) 与 getValue()，参数类型与列类型一致）
+#           b) 枚举**还不存在**：插件在 src/main/java 下生成一个骨架，
+#              只含 value 字段 + fromValue()，成员由人补
+#              （取值类型从实体列类型推导，不用单独配 valueType）
+#              已存在的枚举绝不覆盖；骨架也只生成一次
+#   domain  可选。仅 byDomain=true 时有效，覆盖"表名下划线前的部分"这个默认域
+#
+# 配置方法示例：
+#   entities:
+#     - name: AppUser
+#       enums:
+#         status: "com.example.demo.domain.user.UserStatusEnum"
+#     - name: OrderRecord
+#       enums:
+#         state: "com.example.demo.domain.order.OrderStateEnum"
+#       domain: "trade"
+# ============================================================================
+entities:
+  - name: AppUser
+    enums:
+      status: "com.example.demo.domain.user.UserStatusEnum"
+  - name: OrderRecord
+    enums:
+      state: "com.example.demo.domain.order.OrderStateEnum"
+  - name: Device
+    enums:
+      kind: "com.example.demo.domain.device.DeviceKindEnum"

@@ -1,0 +1,46 @@
+# ============================================================================
+# demo-dao 的 codegen 配置
+#
+#   mvn -pl demo-dao com.mds.codegen:codegen-maven-plugin:1.0.0-SNAPSHOT:generate
+#
+# 实体清单写在 entities 里，正常不需要 -Dcodegen.entity。
+# ============================================================================
+
+source:
+  entityPackage: "com.mds.demo.entity"
+  mapperPackage: "com.mds.demo.mapper"
+  classesRoot: "${project.build.directory}/classes"
+
+entities:
+  - name: AppUser
+    domain: "user"
+    enums:
+      status: "com.mds.demo.domain.user.UserStatusEnum"
+  - name: OrderRecord
+    domain: "order"
+    enums:
+      state: "com.mds.demo.domain.order.OrderStateEnum"
+  - name: Device
+    domain: "device"
+    enums:
+      kind: "com.mds.demo.domain.device.DeviceKindEnum"
+
+output:
+  # 生成物写 target（可丢弃）；要直接进源码树就改成 "src/main/java"
+  dir: "target/generated-sources/codegen"
+  dtoPackage: "com.mds.demo.dto"
+  convertPackage: "com.mds.demo.convert"
+  modelPackage: "com.mds.demo.model"
+  implSubPackage: "impl"
+  byDomain: true
+
+naming:
+  dtoSuffix: "Dto"
+  convertSuffix: "Converter"
+  serviceSuffix: "ModelService"
+  implSuffix: "ModelServiceImpl"
+
+write:
+  policy: "failOnDrift"
+
+idGenerator: "com.mds.demo.common.IdGenerator"
