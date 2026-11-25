@@ -1,45 +1,54 @@
 # mds-code-generate
 
-读 **MyBatis Generator（`targetRuntime = MyBatis3DynamicSql`）** 产出的
-`entity` / `mapper` / `DynamicSqlSupport`，生成 DTO / MapStruct converter / model-service。
+把 **MyBatis Generator 生成的数据访问层**，再往前推一步：
 
-## 用法（IDEA 里点一下就行）
+```
+MBG 产物（entity / mapper / DynamicSqlSupport）
+        │
+        ▼  codegen-maven-plugin
+DTO  ─  MapStruct converter  ─  枚举  ─  model-service 接口 + 实现
+```
 
-1. **配置**：模块根目录放 `codegen.yaml`（逐项说明见 [codegen.yaml](codegen.yaml)）；
-2. **Build**：IDEA 里 Build 一次（或 `mvn compile`）——插件读的是**已编译的 class**；
-3. **生成**：IDEA Maven 面板 → ~Lifecycle~ 之外的 ~Plugins~ → ~codegen~ → **~codegen:generate`**
-   （或命令行 ~mvn codegen:generate`）。
+这样从"能访问数据库"到"能写业务代码"之间的那些样板，不用再手敲一遍。
 
-> 第 2 步是硬要求：插件不看源码，看 `target/classes` 里的类。
-> IDEA 的 Build 会把 class 编出来，所以"Build 一次 → 点 generate"就够。
+## 功能
 
-实体清单写在 yaml 里，**不需要每次带 `-Dcodegen.entity`**。
-
-## 生成物
-
-| 生成物 | 说明 |
+| 生成物 | 内容 |
 |---|---|
-| `dto/<X>Dto.java` | `@Data @NoArgsConstructor @AllArgsConstructor @Builder` |
-| `convert/<X>Converter.java` | `@Mapper(componentModel = "spring")` + 枚举双向转换 |
-| `model/[<域>/]<X>ModelService.java` | 基线 CRUD 接口，`findById` 固定返回 `Optional` |
-| `model/[<域>/]impl/<X>ModelServiceImpl.java` | 实现（`@Service`，字段 `protected`） |
+| `XxxDto` | `@Data @NoArgsConstructor @AllArgsConstructor @Builder`；枚举列换成枚举类型 |
+| `XxxConverter` | MapStruct `@Mapper(componentModel = "spring")`；entity ↔ dto，枚举双向转换 |
+| `XxxModelService` | 8 个基线 CRUD 接口，`findById` 固定返回 `Optional` |
+| `XxxModelServiceImpl` | `@Service` 实现；`mapper` / `converter` / `idGenerator` 为 `protected` |
+| 枚举骨架 | 只在配置的枚举还不存在时生成一次，成员由人补 |
 
-全部写到 `output.dir`（默认 `target/generated-sources/codegen`）。
+基线 CRUD 是：`insert`、`insertBatch`、`findById`、`findByIds`、
+`updateById`、`updateSelectiveById`、`deleteById`、`deleteByIds`。
 
-## 最小配置
+## 用法
+
+### 1. 引入插件
+
+```xml
+<plugin>
+  <groupId>com.mds.codegen</groupId>
+  <artifactId>codegen-maven-plugin</artifactId>
+  <version>1.0.0-SNAPSHOT</version>
+</plugin>
+```
+
+### 2. 写配置
+
+模块根目录放 `codegen.yaml`，逐项说明见 [codegen.yaml](codegen.yaml)。最小可用：
 
 ```yaml
 source:
-  entityPackage: "com.example.demo.entity"     # ← 改成你自己项目的包名
+  entityPackage: "com.example.demo.entity"
   mapperPackage: "com.example.demo.mapper"
 
 output:
   dtoPackage: "com.example.demo.dto"
   convertPackage: "com.example.demo.convert"
   modelPackage: "com.example.demo.model"
-  byDomain: false
-
-idGenerator: "com.example.demo.common.IdGenerator"   # 可选
 
 entities:
   - name: AppUser
@@ -47,148 +56,119 @@ entities:
       status: "com.example.demo.domain.user.UserStatusEnum"
 ```
 
-> ⚠️ 上面全是 `com.example.demo` 占位包名。抄过去必须改成**本项目实际包名**，
-> 否则报 `实体 class 目录不存在: .../com/example/demo/entity`。
+> ⚠️ `com.example.demo.*` 是占位，改成你自己项目的包名。
 
-## 生成到真实代码里（提交进 git）
+### 3. 跑
 
-**只改一个配置**：
+**IDEA**：先 Build 一次，Maven 面板 → `Plugins` → `codegen` → **`codegen:generate`**。
 
-```yaml
-output:
-  dir: "src/main/java"
+**命令行**：
+
+```bash
+mvn compile                                  # 必须先编译，见下
+mvn codegen:generate                         # 按配置生成全部实体
+mvn compile                                  # 把生成物编译进来
 ```
 
-其它都不用动。区别：
+> **为什么必须先 compile**：插件读的是 `target/classes` 里的**字节码**，不是源码。
+> 所以"生成"必然发生在一次编译之后；第二次 compile 是把生成物带进来。
 
-| | `target/generated-sources/codegen`（默认） | `src/main/java` |
-|---|---|---|
-| 是否进 git | 否 | **是** |
-| `mvn clean` | 删掉，重跑插件再生成 | 不删 |
-| 每次构建跑插件 | 要 | **不用**，改表/配置才重跑 |
-| 还要 build-helper | 要 | **不要** |
+只处理**一个实体**（调试用）：`mvn codegen:generate -Dcodegen.entity=AppUser`。
 
-> `write.policy` 建议保持 `failOnDrift`：生成结果与现有文件不一致时先失败，
-> `git diff` 确认后再用 `-Dcodegen.writePolicy=overwrite` 覆盖一次。
-> 这样别人的手改不会被静默冲掉。
+## 主要配置
 
-## 枚举：两条路径
-
-在 `entities[].enums` 里写 **字段名 → 枚举全限定名**，插件按"这个类存不存在"自己分：
-
-| 情况 | 插件行为 |
+| 配置 | 说明 |
 |---|---|
-| 枚举**已存在** | 直接用：DTO 字段换成枚举类型，converter 生成双向 `mapXxx` / `mapXxxValue` |
-| 枚举**不存在** | 在 `src/main/java` 下生成骨架，只含 `value` 字段 + `fromValue()`，**成员由人补** |
+| `source.entityPackage` / `source.mapperPackage` | MBG 产物所在包 |
+| `output.dir` | 生成到哪，默认 `target/generated-sources/codegen` |
+| `output.byDomain` | `false` 平铺；`true` 按 `entities[].domain` 分 `model.<域>` |
+| `entities[].enums` | 字段名 → 枚举全限定名 |
+| `idGenerator` | 主键生成器全限定名，**只要 `long nextId()`**，不必实现任何接口 |
+| `write.policy` | `overwrite` / `skip` / `failOnDrift`（默认） |
+| `naming.*` | 各类文件后缀，一般不用改 |
 
-_注意：骨架写在源码树（不是 target）——它之后由人长期维护，放 target 会被 clean 掉。已存在的枚举绝不覆盖。_
+**生成进源码树**（提交进 git）：把 `output.dir` 改成 `"src/main/java"` 就行，其它不动。
+这样 `mvn clean` 不会删它，每次构建也不用跑插件。
 
-### 走一遍
+## 实现方法（简要）
 
-```yaml
-entities:
-  - name: AppUser
-    enums:
-      status: "com.example.demo.domain.user.UserStatusEnum"   # 还不存在？
-```
+### 读取：加载字节码 + 反射
 
-点 `codegen:generate`：
+不解析源码，也不用 ASM 手写 visitor——用隔离的 `URLClassLoader`
+（父加载器取 `getPlatformClassLoader()`，避免插件自身依赖干扰）把 MBG 的 class 加载进来，
+直接读它们的反射信息。
 
-```
-[INFO]   枚举 com.example.demo.domain.user.UserStatusEnum 不存在 -> 已生成骨架 src/main/java/.../UserStatusEnum.java（请补成员后重新 Build）
-[INFO]   写入 .../AppUserDto.java
-```
+这样做的好处是**元数据取的是 MBG 自己的意图，不用猜**：
 
-生成的骨架：
-
-```java
-@Getter
-@RequiredArgsConstructor
-public enum UserStatusEnum {
-  ;                                    // ← 补成员：NORMAL((short) 1), LOCKED((short) 2);
-
-  private final short value;           // ← 类型从实体列推导（SMALLINT → short）
-
-  public static UserStatusEnum fromValue(short value) {
-    for (UserStatusEnum item : values()) {
-      if (item.value == value) return item;
-    }
-    throw new IllegalArgumentException("未知的 UserStatusEnum 取值: " + value);
-  }
-}
-```
-
-补完成员再 Build 一次就通了。**再点 generate 会把枚举认作已存在**，不会重复生成：
-
-```
-[INFO]   完成：写入 0 个文件，跳过 4 个
-```
-
-> 取值类型（`short` / `int` / `long` / `String`）从实体列类型推导，不单独配置。
-
-## 固定项（不做开关）
-
-| 项 | 值 |
+| 要什么 | 从哪读 |
 |---|---|
-| Lombok | `@Data @NoArgsConstructor @AllArgsConstructor @Builder` |
-| MapStruct | `@Mapper(componentModel = "spring")` |
-| Spring | 实现类 `@Service` |
-| `findById` | 固定返回 `Optional` |
-| 枚举 | 配置里给全限定名；不存在时生成骨架（见下） |
+| 表名 | `DynamicSqlSupport` 里 `SqlTable.tableName()` |
+| 列名 | 同上的 `SqlColumn.name()` |
+| 列的 Java 类型 | `SqlColumn<T>` 的**泛型实参**（MBG 产物的 `javaType()` 恒为空） |
+| 主键 | mapper 上 MBG 写的 `@Result(id = true).property()`，不反推合成 lambda |
 
-理由：目标场景就一种技术栈。多一个开关就多一处能配错的地方。
+代价就是那个"先 compile"的约束。
 
-## 为什么报错（最常见的两种）
+### 生成：JavaPoet
 
-| 现象 | 原因 | 解决 |
-|---|---|---|
-| `实体 class 目录不存在: .../com/example/demo/entity` | 抄了示例配置，占位包名没改 | 改成项目实际包名（报错里会列出实际存在的包） |
-| 同上，但包名是对的 | 还没编译 | 先 Build / `mvn compile` |
-| `未知配置项 output.xxx` | 用了已移除的旧键 | 报错里会写明替代方案 |
+每个部件一个 `Generator` 实现（`dto` / `convert` / `model`），
+输入统一是"表模型 + 该实体配置"，输出 `GeneratedFile`，**不碰文件系统**。
 
-## 命令行覆盖项
+### 落盘：一处策略
 
-| 参数 | 作用 |
+`SourceWriter` 统一处理 `overwrite` / `skip` / `failOnDrift`。
+默认 `failOnDrift`：内容不一致就失败并列出文件，正好可以当"生成物是否被人手改过"的 CI 探针。
+
+### 包结构
+
+```
+src/main/java/com/mds/codegen/
+├── CodegenMojo.java          唯一的 Mojo：装载配置 → 读元数据 → 调生成器 → 落盘
+├── config/                   YAML 装载与校验（未知键直接报错）
+├── read/                     ReflectionReader / ClasspathProbe / ReadContext
+├── model/                    Table / Bean / Column / TypeRef
+└── gen/                      各部件生成器 + SourceWriter + DomainNaming
+```
+
+## 枚举
+
+在 `entities[].enums` 里写 **字段名 → 枚举全限定名**，插件按该类存不存在自己分：
+
+| 情况 | 行为 |
 |---|---|
-| `-Dcodegen.config` | 配置文件路径（优先于 pom 的 configFile） |
-| `-Dcodegen.entity` | 只处理某一个实体（调试用，可选） |
-| `-Dcodegen.writePolicy` | `overwrite / skip / failOnDrift` |
+| **已存在** | 直接用：DTO 字段换成枚举，converter 生成 `mapXxx` / `mapXxxValue` |
+| **不存在** | 在 `src/main/java` 下生成骨架（`value` + `fromValue`），成员由人补 |
 
-## 设计取舍
+骨架写源码树而不是 target——它之后由人长期维护。已存在的枚举绝不覆盖，骨架也只生成一次。
 
-1. **读取方式：加载类后反射**。要求先编译；换来元数据绝对准确——
-   主键读 `@Result(id = true)`，列类型读 `SqlColumn<T>` 的泛型实参。
-2. **实体清单写在配置文件**，命令行默认不带参数。
-3. **写盘策略只有一处实现**（`SourceWriter`）：`overwrite / skip / failOnDrift`。
-4. **未知配置项直接报错**，并指明替代方案。
+取值类型从实体列推导（`SMALLINT → short`、`INT → int`、`BIGINT → long`、`VARCHAR → String`），
+不需要单独配置。
 
 ## 加自定义方法
 
-直接写进生成的实现类，之后靠 git 对比/回滚；不想被覆盖就把 `write.policy` 设为 `skip`。
+直接写进生成的实现类，靠 **git 对比 / 回滚**；不想再被覆盖就把 `write.policy` 设为 `skip`。
 `mapper` / `converter` / `idGenerator` 都是 `protected`。
 
-## 仓库约定
+## 固定项（不做开关）
 
-- `target/`、`.idea/`、`*.iml` 不进仓库（见 [.gitignore](.gitignore)）；
-- **数据库口令不进仓库**：用 `DB_PASSWORD` 环境变量提供，见 [it/README.md](it/README.md)。
+Lombok（`@Data` / `@Builder` 等）、MapStruct、Spring `@Service`、`findById` 返回 `Optional`
+都是写死的。目标场景就一种技术栈，多一个开关就多一处能配错的地方、多一条要测的分支。
 
-## 模块
+## 常见报错
 
-```
-codegen-maven-plugin/
-├── codegen.yaml                     # 配置示例（逐项注释）
-├── docs/research-access-layer-plugin.md
-├── src/main/java/com/mds/codegen/
-│   ├── CodegenMojo.java
-│   ├── config/                      # YAML 装载 + 校验
-│   ├── model/                       # Table / Bean / Column / TypeRef
-│   ├── read/                        # ReflectionReader
-│   └── gen/                         # 4 个生成器 + SourceWriter
-└── it/                              # 链路验证（MBG + 本插件 + 真实 MySQL + 集成测试）
-```
+| 现象 | 原因 | 解决 |
+|---|---|---|
+| `实体 class 目录不存在` | 没编译，或包名写错 | 先 Build；包名不对时报错会列出实际存在的包 |
+| `未知配置项 output.xxx` | 用了已移除的旧键 | 报错里写明替代方案 |
 
 ## 已知边界
 
-- **只支持 MBG 的 `MyBatis3DynamicSql` 产物形态**；
-- **主键必须单字段**：联合主键直接报错；
-- 自动生成主键的条件是「主键字段名 = `id` **且** 类型 = `Long`」。
+- 只支持 MBG 的 `MyBatis3DynamicSql` 产物形态；
+- 主键必须单字段，联合主键直接报错；
+- 自动生成主键的条件：主键字段名是 `id` **且** 类型是 `Long`。
+
+## 仓库
+
+- `it/`：链路验证工程（真实 MySQL + MBG + 本插件 + 集成测试），见 [it/README.md](it/README.md)；
+- `docs/research-access-layer-plugin.md`：对原 `access-layer-plugin` 的调研；
+- `target/`、`.idea/`、`*.iml` 不进仓库；数据库口令由 `DB_PASSWORD` 环境变量提供。
